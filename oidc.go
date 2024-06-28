@@ -6,21 +6,58 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 )
 
-type OpenIDService struct {
-	log       *slog.Logger
-	configURL string
+type openIDHandler struct {
+	log     *slog.Logger
+	service *openIDService
 }
 
-func NewOpenIDService(log *slog.Logger, configURL string) *OpenIDService {
-	return &OpenIDService{
+func newOpenIDHandler(log *slog.Logger, service *openIDService) *openIDHandler {
+	return &openIDHandler{
+		log:     log,
+		service: service,
+	}
+}
+
+func (h openIDHandler) printConfig(w http.ResponseWriter, _ *http.Request) {
+	config, err := h.service.getConfig()
+	if err != nil {
+		h.log.Error("Failed to get OIDC config", slog.Any("error", err))
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	jsonBytes, err := json.Marshal(config)
+	if err != nil {
+		h.log.Error("Failed to marshal OIDC config JSON", slog.Any("error", err))
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(jsonBytes)
+}
+
+type openIDService struct {
+	log          *slog.Logger
+	configURL    string
+	cachedConfig *openIDConfig
+	lastFetch    time.Time
+}
+
+func newOpenIDService(log *slog.Logger, configURL string) *openIDService {
+	return &openIDService{
 		log:       log,
 		configURL: configURL,
 	}
 }
 
-func (s OpenIDService) GetConfig() (*OpenIDConfiguration, error) {
+func (s openIDService) getConfig() (*openIDConfig, error) {
+	if time.Now().Sub(s.lastFetch) < 10*time.Minute && s.cachedConfig != nil {
+		return s.cachedConfig, nil
+	}
+
 	resp, err := http.Get(s.configURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %v", err)
@@ -36,15 +73,17 @@ func (s OpenIDService) GetConfig() (*OpenIDConfiguration, error) {
 		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
 
-	var config OpenIDConfiguration
+	var config openIDConfig
 	if err := json.Unmarshal(body, &config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal JSON: %v", err)
 	}
 
+	s.cachedConfig = &config
+	s.lastFetch = time.Now()
 	return &config, nil
 }
 
-type OpenIDConfiguration struct {
+type openIDConfig struct {
 	Issuer                                     string   `json:"issuer"`
 	AuthorizationEndpoint                      string   `json:"authorization_endpoint"`
 	TokenEndpoint                              string   `json:"token_endpoint,omitempty"`
