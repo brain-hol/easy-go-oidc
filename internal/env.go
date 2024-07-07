@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"reflect"
 )
 
-func configFromEnv(cfg interface{}, opts ...envKeyOption) error {
+func ConfigFromEnv(cfg interface{}, opts ...EnvKeyOption) error {
 	val := reflect.ValueOf(cfg).Elem()
 	typ := val.Type()
 
@@ -51,9 +51,9 @@ func configFromEnv(cfg interface{}, opts ...envKeyOption) error {
 	return nil
 }
 
-type envKeyOption func(string) string
+type EnvKeyOption func(string) string
 
-func envPrefix(prefix string) envKeyOption {
+func EnvPrefix(prefix string) EnvKeyOption {
 	return func(key string) string {
 		return prefix + key
 	}
