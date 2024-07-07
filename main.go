@@ -1,49 +1,51 @@
 package main
 
 import (
-	"flag"
-	"fmt"
+	"context"
 	"log/slog"
-	"net/http"
 	"os"
+	"strings"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-
+	"github.com/coreos/go-oidc"
 	_ "github.com/joho/godotenv/autoload"
+	"golang.org/x/oauth2"
 )
 
-const ENV_PREFIX = "GOIDC_"
+type config struct {
+	Addr string `env:"ADDR"`
+	Port string `env:"PORT"`
+
+	Issuer       string `env:"ISSUER"`
+	ClientID     string `env:"CLIENT_ID"`
+	ClientSecret string `env:"CLIENT_SECRET"`
+	RedirectURL  string `env:"REDIRECT_URL"`
+	Scopes       string `env:"SCOPES" default:"profile,openid"`
+}
 
 func main() {
-	addr := flag.String("addr", getEnv("ADDR", ""), "Address to listen for TCP connections on")
-	port := flag.String("port", getEnv("PORT", "1200"), "Port to listen for TCP connections on")
-	configURL := flag.String("config-url", getEnv("CONFIG_URL", ""), "URL to get OIDC configuration")
+	slog.SetLogLoggerLevel(slog.LevelDebug)
+	log := slog.Default()
 
-	flag.Parse()
+	var cfg config
+	if err := configFromEnv(&cfg, envPrefix("GOIDC_")); err != nil {
+		log.Error("failed to load all config options", slog.Any("error", err))
+		os.Exit(1)
+	}
+	log.Debug("loaded config", "cfg", cfg)
 
-	if *configURL == "" {
-		slog.Default().Error("No configURL was provided")
+	provider, err := oidc.NewProvider(context.TODO(), cfg.Issuer)
+	if err != nil {
+		log.Error("failed to initialize provider", slog.Any("error", err))
 		os.Exit(1)
 	}
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("welcome"))
-	})
-
-	oidcService := newOpenIDService(slog.Default(), *configURL)
-	oidcHandler := newOpenIDHandler(slog.Default(), oidcService)
-	r.Get("/config", oidcHandler.printConfig)
-
-	http.ListenAndServe(fmt.Sprintf("%s:%s", *addr, *port), r)
-}
-
-func getEnv(key string, fallback string) string {
-	if value, exists := os.LookupEnv(fmt.Sprintf(ENV_PREFIX + key)); exists {
-		return value
+	oauth2Config := oauth2.Config{
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		RedirectURL:  cfg.RedirectURL,
+		Endpoint:     provider.Endpoint(),
+		Scopes:       strings.Split(cfg.Scopes, ","),
 	}
-	return fallback
+
+	log.Info("", "authCodeURL", oauth2Config.AuthCodeURL("asdf"))
 }
