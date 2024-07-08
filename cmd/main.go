@@ -27,11 +27,8 @@ type config struct {
 }
 
 func main() {
-	// slog.SetLogLoggerLevel(slog.LevelDebug)
-	// log := slog.Default()
-
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		// Level: slog.LevelDebug,
+		Level: slog.LevelDebug,
 	}))
 
 	var cfg config
@@ -56,8 +53,10 @@ func main() {
 	}
 
 	authService := internal.NewAuthService(log, &oauth2Config, provider)
+	
+	sm := internal.NewMemorySessionManager()
 
-	r := internal.NewRouter(authService)
+	r := internal.NewRouter(log, authService, sm)
 	err = http.ListenAndServe(fmt.Sprintf("%s:%s", cfg.Addr, cfg.Port), r)
 	if err != nil {
 		log.Error("Failed to start server", slog.Any("error", err))

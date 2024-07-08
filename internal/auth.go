@@ -135,7 +135,7 @@ func (s *AuthService) handleCallback(w http.ResponseWriter, r *http.Request) {
 		ClientID: s.oauth2.ClientID,
 	})
 
-	_, err = verifier.Verify(r.Context(), rawIDToken)
+	idToken, err := verifier.Verify(r.Context(), rawIDToken)
 	if err != nil {
 		s.log.Error("Failed to verify ID token")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -149,7 +149,8 @@ func (s *AuthService) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session.Auth = oauth2Token
-	
+	session.IDToken = idToken
+
 	http.Redirect(w, r, state.ReturnURL, http.StatusFound)
 }
 

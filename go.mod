@@ -6,6 +6,7 @@ require (
 	github.com/coreos/go-oidc v2.2.1+incompatible
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/joho/godotenv v1.5.1
+	github.com/segmentio/ksuid v1.0.4
 	golang.org/x/oauth2 v0.21.0
 )
 
