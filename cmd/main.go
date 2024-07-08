@@ -31,7 +31,7 @@ func main() {
 	// log := slog.Default()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		// Level: slog.LevelDebug,
 	}))
 
 	var cfg config
@@ -55,8 +55,6 @@ func main() {
 		Scopes:       strings.Split(cfg.Scopes, ","),
 	}
 
-	log.Info("", "authCodeURL", oauth2Config.AuthCodeURL("asdf"))
-
 	authService := internal.NewAuthService(log, &oauth2Config, provider)
 
 	r := internal.NewRouter(authService)
@@ -64,4 +62,5 @@ func main() {
 	if err != nil {
 		log.Error("Failed to start server", slog.Any("error", err))
 	}
+	log.Debug("Server listening", "addr", cfg.Addr, "port", cfg.Port)
 }
