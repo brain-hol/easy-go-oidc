@@ -22,7 +22,6 @@ type config struct {
 	Issuer       string `env:"ISSUER"`
 	ClientID     string `env:"CLIENT_ID"`
 	ClientSecret string `env:"CLIENT_SECRET"`
-	RedirectURL  string `env:"REDIRECT_URL"`
 	Scopes       string `env:"SCOPES" default:"profile,openid"`
 }
 
@@ -47,7 +46,7 @@ func main() {
 	oauth2Config := oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
-		RedirectURL:  cfg.RedirectURL,
+		RedirectURL:  fmt.Sprintf("https://%s:%s/callback", cfg.Addr, cfg.Port),
 		Endpoint:     provider.Endpoint(),
 		Scopes:       strings.Split(cfg.Scopes, ","),
 	}
