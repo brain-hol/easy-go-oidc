@@ -53,11 +53,11 @@ func main() {
 	}
 
 	authService := internal.NewAuthService(log, &oauth2Config, provider)
-	
+
 	sm := internal.NewMemorySessionManager()
 
 	r := internal.NewRouter(log, authService, sm)
-	err = http.ListenAndServe(fmt.Sprintf("%s:%s", cfg.Addr, cfg.Port), r)
+	err = http.ListenAndServeTLS(fmt.Sprintf("%s:%s", cfg.Addr, cfg.Port), "easy-goidc.localhost.pem", "easy-goidc.localhost.key", r)
 	if err != nil {
 		log.Error("Failed to start server", slog.Any("error", err))
 	}
