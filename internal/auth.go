@@ -9,8 +9,13 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/brain-hol/easy-go-oidc/internal/httpx"
 	"github.com/coreos/go-oidc"
 	"golang.org/x/oauth2"
+)
+
+const (
+	oauthStateCookie = "auth_state"
 )
 
 type AuthService struct {
@@ -41,7 +46,7 @@ func (s *AuthService) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_state",
+		Name:     oauthStateCookie,
 		Value:    state,
 		Path:     "/",
 		HttpOnly: true,
@@ -50,6 +55,115 @@ func (s *AuthService) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 
 	http.Redirect(w, r, s.oauth2.AuthCodeURL(state), http.StatusFound)
+}
+
+func (s *AuthService) handleCallback(w http.ResponseWriter, r *http.Request) {
+	// Remove auth state cookie regardless of result of callback
+	httpx.UnsetCookie(w, oauthStateCookie)
+
+	// Check for errors from auth server
+	errorType := r.URL.Query().Get("error")
+	if errorType != "" {
+		errorDescription := r.URL.Query().Get("error_description")
+		errorUri := r.URL.Query().Get("error_uri")
+		s.log.Error("Error returned from authorize endpoint", slog.String("type", errorType), slog.String("description", errorDescription), slog.String("uri", errorUri))
+		httpx.BadRequest(w, r)
+		return
+	}
+
+	// Get the state from the request's cookie
+	stateCookie, err := r.Cookie(oauthStateCookie)
+	if err != nil {
+		s.log.Error("Missing state cookie", slog.Any("error", err))
+		httpx.BadRequest(w, r)
+		return
+	}
+	stateEncoded := stateCookie.Value
+
+	// Get the state returned from the authorize endpoint
+	returnedState := r.URL.Query().Get("state")
+	if returnedState == "" {
+		s.log.Error("No state param was returned from the auth server")
+		httpx.BadRequest(w, r)
+		return
+	}
+
+	// Ensure the returned state and the cookie state are the same
+	if returnedState != stateEncoded {
+		s.log.Error("State returned from provider did not match state from cookie")
+		httpx.BadRequest(w, r)
+		return
+	}
+
+	// Get code from auth server
+	authCode := r.URL.Query().Get("code")
+	if authCode == "" {
+		s.log.Error("No auth code returned from auth server")
+		httpx.BadRequest(w, r)
+		return
+	}
+
+	token, err := s.oauth2.Exchange(r.Context(), authCode)
+	if err != nil {
+		s.log.Error("Failed to exchange auth code for access token", slog.Any("error", err))
+		httpx.BadRequest(w, r)
+		return
+	}
+
+	atBytes, err := json.MarshalIndent(token, "", "    ")
+	if err != nil {
+		s.log.Error("Failed to marshal access token", slog.Any("error", err))
+		httpx.InternalServerError(w, r)
+		return
+	}
+	w.Write(atBytes)
+	w.Write([]byte("\n\n\n"))
+
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if !ok {
+		s.log.Error("No id token was returned with access token")
+		httpx.BadRequest(w, r)
+		return
+	}
+
+	verifier := s.oidc.Verifier(&oidc.Config{ClientID: s.oauth2.ClientID})
+
+	idToken, err := verifier.Verify(r.Context(), rawIDToken)
+	if err != nil {
+		s.log.Error("Failed to verify the id token", slog.Any("error", err))
+		httpx.BadRequest(w, r)
+		return
+	}
+
+	var claims map[string]json.RawMessage
+	if err := idToken.Claims(&claims); err != nil {
+		s.log.Error("Failed to parse claims from id token", slog.Any("error", err))
+		httpx.BadRequest(w, r)
+		return
+	}
+
+	// Temp, delete this later
+	claimsBytes, err := json.MarshalIndent(claims, "", "    ")
+	if err != nil {
+		s.log.Error("Failed to marshal claims", slog.Any("error", err))
+		httpx.InternalServerError(w, r)
+		return
+	}
+	w.Write(claimsBytes)
+
+	// stateJSON, err := base64.URLEncoding.DecodeString(stateEncoded)
+	// if err != nil {
+	// 	s.log.Error("State cookie was not properly base64 encoded", slog.Any("error", err))
+	// 	httpx.BadRequest(w, r)
+	// 	return
+	// }
+
+	// var state stateData
+	// if err := json.Unmarshal(stateJSON, &state); err != nil {
+	// 	s.log.Error("Failed to parse state data as JSON", slog.Any("error", err))
+	// 	httpx.BadRequest(w, r)
+	// 	return
+	// }
 }
 
 type stateData struct {

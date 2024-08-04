@@ -10,5 +10,6 @@ func NewRouter(auth *AuthService) *chi.Mux {
 
 	r.Use(middleware.Heartbeat("/ping"))
 	r.Get("/login", auth.handleLogin)
+	r.Get("/callback", auth.handleCallback)
 	return r
 }

@@ -11,8 +11,6 @@ import (
 	"github.com/brain-hol/easy-go-oidc/internal"
 	"github.com/coreos/go-oidc"
 	"golang.org/x/oauth2"
-
-	_ "github.com/joho/godotenv/autoload"
 )
 
 type config struct {
@@ -54,8 +52,6 @@ func main() {
 		Endpoint:     provider.Endpoint(),
 		Scopes:       strings.Split(cfg.Scopes, ","),
 	}
-
-	log.Info("", "authCodeURL", oauth2Config.AuthCodeURL("asdf"))
 
 	authService := internal.NewAuthService(log, &oauth2Config, provider)
 
