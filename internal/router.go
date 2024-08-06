@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/brain-hol/easy-go-oidc/internal/httpx"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -12,13 +13,15 @@ import (
 func NewRouter(log *slog.Logger, auth *AuthService, sm SessionManager) *chi.Mux {
 	r := chi.NewRouter()
 
-	r.Use(middleware.Heartbeat("/ping"))
 	r.Use(SessionMiddleware(log, sm))
+	r.Use(middleware.Heartbeat("/ping"))
+
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := r.Context().Value(sessionCtxKey).(*session)
 		if sess == nil || !ok {
 			log.Error("No session found")
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			httpx.InternalServerError(w)
+			return
 		}
 
 		auth := sess.Auth
@@ -27,10 +30,10 @@ func NewRouter(log *slog.Logger, auth *AuthService, sm SessionManager) *chi.Mux 
 			return
 		}
 
-		jsonStr, err := json.Marshal(auth)
+		jsonStr, err := json.MarshalIndent(auth, "", "    ")
 		if err != nil {
 			log.Error("Failed to marshal auth JSON", slog.Any("error", err))
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			httpx.InternalServerError(w)
 			return
 		}
 		w.Write(jsonStr)
@@ -41,10 +44,10 @@ func NewRouter(log *slog.Logger, auth *AuthService, sm SessionManager) *chi.Mux 
 			return
 		}
 
-		jsonStr, err = json.Marshal(idToken)
+		jsonStr, err = json.MarshalIndent(idToken, "", "    ")
 		if err != nil {
 			log.Error("Failed to marshal idToken JSON", slog.Any("error", err))
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			httpx.InternalServerError(w)
 			return
 		}
 		w.Write(jsonStr)

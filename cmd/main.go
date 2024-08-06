@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -24,6 +26,12 @@ type config struct {
 	ClientSecret string `env:"CLIENT_SECRET"`
 	Scopes       string `env:"SCOPES" default:"profile,openid"`
 }
+
+//go:embed certs/server.cert.pem
+var certBytes []byte
+
+//go:embed certs/server.key.pem
+var keyBytes []byte
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -56,9 +64,25 @@ func main() {
 	sm := internal.NewMemorySessionManager()
 
 	r := internal.NewRouter(log, authService, sm)
-	err = http.ListenAndServeTLS(fmt.Sprintf("%s:%s", cfg.Addr, cfg.Port), "easy-goidc.localhost.pem", "easy-goidc.localhost.key", r)
+
+	cert, err := tls.X509KeyPair(certBytes, keyBytes)
+	if err != nil {
+		log.Error("Failed to create server key pair", slog.Any("error", err))
+		os.Exit(1)
+	}
+	tlsConfig := tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+	server := http.Server{
+		Addr:      fmt.Sprintf("%s:%s", cfg.Addr, cfg.Port),
+		TLSConfig: &tlsConfig,
+		Handler:   r,
+	}
+	err = server.ListenAndServeTLS("", "")
 	if err != nil {
 		log.Error("Failed to start server", slog.Any("error", err))
+		os.Exit(1)
 	}
+
 	log.Debug("Server listening", "addr", cfg.Addr, "port", cfg.Port)
 }

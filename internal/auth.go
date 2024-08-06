@@ -9,8 +9,13 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/brain-hol/easy-go-oidc/internal/httpx"
 	"github.com/coreos/go-oidc"
 	"golang.org/x/oauth2"
+)
+
+const (
+	oauthStateCookie = "auth_state"
 )
 
 type AuthService struct {
@@ -36,18 +41,18 @@ func (s *AuthService) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	state, err := createStateData(returnURL)
 	if err != nil {
-		s.log.Error("Failed to generate state", slog.Any("error", err))
+		s.log.Error("Failed to generate auth state before authorize request", slog.Any("error", err))
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
-		s.log.Error("Failed to marshal state JSON", slog.Any("error", err))
+		s.log.Error("Failed to marshal auth state to JSON", slog.Any("error", err))
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_state",
+		Name:     oauthStateCookie,
 		Value:    base64.URLEncoding.EncodeToString(stateJSON),
 		Path:     "/",
 		HttpOnly: true,
@@ -59,93 +64,90 @@ func (s *AuthService) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *AuthService) handleCallback(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_state",
-		Value:    "",
-		Path:     "/",
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
-		HttpOnly: true,
-		// Secure:   true, // Adjust according to your environment
-	})
-	stateCookie, err := r.Cookie("oauth_state")
+	// Remove auth state cookie regardless of result of authorize response
+	httpx.UnsetCookie(w, oauthStateCookie)
+
+	// Check for errors from auth server
+	errorType := r.URL.Query().Get("error")
+	if errorType != "" {
+		errorDescription := r.URL.Query().Get("error_description")
+		errorUri := r.URL.Query().Get("error_uri")
+		s.log.Error("Error returned from authorize endpoint", slog.String("type", errorType), slog.String("description", errorDescription), slog.String("uri", errorUri))
+		httpx.BadRequest(w)
+		return
+	}
+
+	// Get the state from the request's cookie
+	stateCookie, err := r.Cookie(oauthStateCookie)
 	if err != nil {
-		s.log.Error("Missing state cookie", slog.Any("error", err))
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		s.log.Error("Missing auth state cookie", slog.Any("error", err))
+		httpx.BadRequest(w)
 		return
 	}
 	stateEncoded := stateCookie.Value
 	stateJSON, err := base64.URLEncoding.DecodeString(stateEncoded)
 	if err != nil {
-		s.log.Error("State cookie was not properly base64 URL encoded", slog.Any("error", err))
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		s.log.Error("Auth state cookie was not properly base64 URL encoded", slog.Any("error", err))
+		httpx.BadRequest(w)
 		return
 	}
 	var state stateData
 	if err := json.Unmarshal(stateJSON, &state); err != nil {
-		s.log.Error("Failed to unmarshall state data JSON", slog.Any("error", err))
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		s.log.Error("Failed to unmarshall auth state data JSON", slog.Any("error", err))
+		httpx.BadRequest(w)
 		return
 	}
 
+	// Get the state returned from the authorize endpoint
 	returnedState := r.URL.Query().Get("state")
 	if returnedState == "" {
-		s.log.Error("No state param was returned from the auth server", slog.Any("error", err))
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		s.log.Error("No state param was returned in authorize response")
+		httpx.BadRequest(w)
 		return
 	}
 
+	// Ensure the returned state and the cookie state.Nonce are the same
 	if returnedState != state.Nonce {
-		s.log.Error("State did not match", slog.Any("error", err))
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		s.log.Error("Authorize response state and cookie state did not match")
+		httpx.BadRequest(w)
 		return
 	}
 
-	errorType := r.URL.Query().Get("error")
-	if errorType != "" {
-		errorDescription := r.URL.Query().Get("error_description")
-		errorUri := r.URL.Query().Get("error_uri")
-		s.log.Error("Errors returned from auth server", "type", errorType, "description", errorDescription, "uri", errorUri)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
-	}
-
+	// Get code from auth server
 	authCode := r.URL.Query().Get("code")
 	if authCode == "" {
-		s.log.Error("No code was returned from auth server", slog.Any("error", err))
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		s.log.Error("No code was returned from auth server")
+		httpx.BadRequest(w)
 		return
 	}
 
 	oauth2Token, err := s.oauth2.Exchange(r.Context(), authCode)
 	if err != nil {
 		s.log.Error("Error exchanging code for auth token", slog.Any("error", err))
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		httpx.BadRequest(w)
 		return
 	}
 
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
-		s.log.Error("No ID Token was returned with access token")
+		s.log.Error("No id token was returned with access token")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	verifier := s.oidc.Verifier(&oidc.Config{
-		ClientID: s.oauth2.ClientID,
-	})
+	verifier := s.oidc.Verifier(&oidc.Config{ClientID: s.oauth2.ClientID})
 
 	idToken, err := verifier.Verify(r.Context(), rawIDToken)
 	if err != nil {
-		s.log.Error("Failed to verify ID token")
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		s.log.Error("Failed to verify id token", slog.Any("error", err))
+		httpx.BadRequest(w)
 		return
 	}
 
 	session, ok := r.Context().Value(sessionCtxKey).(*session)
 	if session == nil || !ok {
-		s.log.Error("No session found", slog.Any("error", err))
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		s.log.Error("No session found")
+		httpx.BadRequest(w)
 		return
 	}
 	session.Auth = oauth2Token
