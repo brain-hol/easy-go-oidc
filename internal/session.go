@@ -17,7 +17,7 @@ type contextKey string
 const sessionCtxKey = contextKey("session")
 
 type session struct {
-	Auth *oauth2.Token
+	Auth    *oauth2.Token
 	IDToken *oidc.IDToken
 }
 
@@ -76,18 +76,22 @@ func SessionMiddleware(log *slog.Logger, sm SessionManager) func(next http.Handl
 			if err != nil || cookie.Value == "" {
 				id, sess = sm.CreateSession()
 				http.SetCookie(w, &http.Cookie{
-					Name:    "session_id",
-					Value:   id,
-					Expires: time.Now().Add(24 * time.Hour),
+					Name:     "session_id",
+					Value:    id,
+					HttpOnly: true,
+					Secure:   true,
+					Expires:  time.Now().Add(24 * time.Hour),
 				})
 			} else {
 				sess, _ = sm.GetSession(cookie.Value)
 				if sess == nil {
 					id, sess = sm.CreateSession()
 					http.SetCookie(w, &http.Cookie{
-						Name:    "session_id",
-						Value:   id,
-						Expires: time.Now().Add(24 * time.Hour),
+						Name:     "session_id",
+						Value:    id,
+						HttpOnly: true,
+						Secure:   true,
+						Expires:  time.Now().Add(24 * time.Hour),
 					})
 				}
 			}

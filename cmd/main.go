@@ -50,7 +50,6 @@ func main() {
 		log.Error("failed to initialize provider", slog.Any("error", err))
 		os.Exit(1)
 	}
-
 	oauth2Config := oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
@@ -58,12 +57,12 @@ func main() {
 		Endpoint:     provider.Endpoint(),
 		Scopes:       strings.Split(cfg.Scopes, ","),
 	}
-
 	authService := internal.NewAuthService(log, &oauth2Config, provider)
 
 	sm := internal.NewMemorySessionManager()
+	home := internal.NewHomeService(log)
 
-	r := internal.NewRouter(log, authService, sm)
+	r := internal.NewRouter(log, authService, sm, home)
 
 	cert, err := tls.X509KeyPair(certBytes, keyBytes)
 	if err != nil {

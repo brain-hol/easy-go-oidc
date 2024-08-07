@@ -56,8 +56,8 @@ func (s *AuthService) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    base64.URLEncoding.EncodeToString(stateJSON),
 		Path:     "/",
 		HttpOnly: true,
-		// Secure:   true,
-		Expires: time.Now().Add(3 * time.Minute),
+		Secure:   true,
+		Expires:  time.Now().Add(3 * time.Minute),
 	})
 
 	http.Redirect(w, r, s.oauth2.AuthCodeURL(state.Nonce), http.StatusFound)
